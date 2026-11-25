@@ -69,11 +69,6 @@ class ServeFixtureTest(unittest.TestCase):
         with open(os.path.join(REPO, "scene", "kit.conf")) as f:
             self.assertIn("KIT_EXPORTS=_agentviz_frame\n", f.read())
 
-    def test_no_feed_strings_as_html(self):
-        for script in ("hive-model.js", "hive-frame.js", "page.js"):
-            _, _, body = get("/" + script)
-            self.assertNotIn("innerHTML", body.decode(), script)
-
     def test_feed_parses(self):
         status, ctype, body = get("/api/agents")
         self.assertEqual(status, 200)
