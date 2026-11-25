@@ -1,73 +1,107 @@
-"""Serve the fixture and check the page, its assets and the feed."""
+"""Serves the fixture feed next to web/ and checks the page, its assets, the
+feed and the vendored copies. Stdlib only: python3 -m unittest discover -s tests"""
 import json
 import os
+import socket
+import subprocess
 import sys
-import threading
+import time
 import unittest
+import urllib.error
 import urllib.request
-from http.server import ThreadingHTTPServer
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, ROOT)
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PORT = int(os.environ.get("HIVE_UNIT_PORT", "9118"))
+BASE = "http://127.0.0.1:%d" % PORT
 
-from vendor.agentfeed.serve import make_handler  # noqa: E402
+PAGE_SCRIPTS = ("strata-loader.js", "strata-kit.js", "agentviz-feed.js", "agentviz-screen.js", "agentviz-hud.js",
+                "agentviz-wire.js", "hive-model.js", "hive-frame.js", "page.js")
 
-WEB = os.path.join(ROOT, "web")
+
+def get(path):
+    with urllib.request.urlopen(BASE + path, timeout=10) as r:
+        return r.status, r.headers.get("Content-Type", ""), r.read()
 
 
-class ServeTest(unittest.TestCase):
+class ServeFixtureTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(WEB, True))
-        cls.base = "http://127.0.0.1:%d" % cls.httpd.server_address[1]
-        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
+        cls.proc = subprocess.Popen(
+            [sys.executable, "-m", "vendor.agentfeed", "serve", "--web", "web", "--port", str(PORT), "--fixture"],
+            cwd=REPO, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            try:
+                socket.create_connection(("127.0.0.1", PORT), timeout=0.5).close()
+                return
+            except OSError:
+                time.sleep(0.1)
+        cls.proc.kill()
+        raise RuntimeError("server did not start")
 
     @classmethod
     def tearDownClass(cls):
-        cls.httpd.shutdown()
-        cls.httpd.server_close()
+        cls.proc.terminate()
+        cls.proc.wait(timeout=10)
 
-    def get(self, path):
-        with urllib.request.urlopen(self.base + path, timeout=10) as r:
-            return r.status, r.headers.get("Content-Type", ""), r.read()
-
-    def test_page_and_assets(self):
-        status, ctype, body = self.get("/")
+    def test_page_loads_the_kit_in_order(self):
+        status, ctype, body = get("/")
         self.assertEqual(status, 200)
         self.assertIn("text/html", ctype)
-        page = body.decode()
-        for asset in ("strata-loader.js", "strata-kit.js", "hive.js"):
-            self.assertIn(asset, page)
-        self.assertIn("hive-engine.wasm", page)
-        for asset in ("strata-loader.js", "strata-kit.js", "hive.js", "hive-engine.js", "hive-engine.wasm"):
-            status, ctype, body = self.get("/" + asset)
+        html = body.decode()
+        self.assertIn("agentviz-hud.css", html)
+        positions = [html.index('src="%s"' % script) for script in PAGE_SCRIPTS]
+        self.assertEqual(positions, sorted(positions))
+        for asset in PAGE_SCRIPTS + ("agentviz-hud.css", "hive-engine.js"):
+            status, ctype, body = get("/" + asset)
             self.assertEqual(status, 200, asset)
-            self.assertGreater(len(body), 100, asset)
-        self.assertEqual(self.get("/hive-engine.wasm")[1], "application/wasm")
+            self.assertGreater(len(body), 500, asset)
+        status, ctype, body = get("/hive-engine.wasm")
+        self.assertEqual(status, 200)
+        self.assertEqual(ctype, "application/wasm")
+        self.assertEqual(body[:4], b"\0asm")
+
+    def test_engine_exports_the_wire_setter(self):
+        _, _, body = get("/page.js")
+        self.assertIn("createHive", body.decode())
+        _, _, body = get("/hive-engine.js")
+        self.assertIn("_agentviz_frame", body.decode())
+        with open(os.path.join(REPO, "scene", "kit.conf")) as f:
+            self.assertIn("KIT_EXPORTS=_agentviz_frame\n", f.read())
+
+    def test_no_feed_strings_as_html(self):
+        for script in ("hive-model.js", "hive-frame.js", "page.js"):
+            _, _, body = get("/" + script)
+            self.assertNotIn("innerHTML", body.decode(), script)
 
     def test_feed_parses(self):
-        for path in ("/api/agents", "/api/agents?fixture=1"):
-            status, ctype, body = self.get(path)
-            self.assertEqual(status, 200)
-            doc = json.loads(body)
-            self.assertEqual(doc["version"], 1)
-            self.assertTrue(doc["fixture"])
-            states = {s["state"] for s in doc["sessions"]}
-            self.assertTrue({"busy", "idle", "waiting", "offline"} <= states)
-            places = {p["id"] for p in doc["places"]}
-            for s in doc["sessions"]:
-                self.assertIn(s["place"], places)
-                for f in s["followers"]:
-                    self.assertIn(f["state"], ("active", "resting"))
+        status, ctype, body = get("/api/agents")
+        self.assertEqual(status, 200)
+        doc = json.loads(body)
+        self.assertEqual(doc["version"], 1)
+        self.assertTrue(doc["fixture"])
+        places = {p["id"] for p in doc["places"]}
+        reasons = {s.get("waitingReason") for s in doc["sessions"] if s["state"] == "waiting"}
+        self.assertEqual(reasons, {"question", "permission"})
+        for s in doc["sessions"]:
+            self.assertIn(s["place"], places)
+            self.assertIn(s["state"], ("offline", "dim", "idle", "busy", "waiting"))
+            self.assertIn(s["action"], ("edit", "run", "read", "web", "delegate", "think", "other", "none"))
+            self.assertLessEqual(len(s["followers"]), 8, "the hive has eight cells around a lead")
+            for f in s["followers"]:
+                self.assertIn(f["state"], ("active", "resting"))
 
-    def test_scene_exports_match_page(self):
-        with open(os.path.join(WEB, "hive.js")) as f:
-            js = f.read()
-        with open(os.path.join(ROOT, "scene", "kit.conf")) as f:
-            conf = f.read()
-        for name in ("_hv_set_comb", "_hv_set_cells", "_hv_set_bees", "_hv_set_trails"):
-            self.assertIn(name, js)
-            self.assertIn(name, conf)
+    def test_no_escape_from_web(self):
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            get("/../vendor/agentfeed/feed.py")
+        self.assertEqual(e.exception.code, 404)
+
+
+class VendoredCopiesTest(unittest.TestCase):
+    def test_vendored_copies_match_their_pins(self):
+        result = subprocess.run([sys.executable, os.path.join(REPO, "vendor", "agentviz-kit", "check_vendor.py"), REPO],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":
