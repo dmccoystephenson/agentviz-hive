@@ -10,8 +10,8 @@ _spec = importlib.util.spec_from_file_location(
 guards = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(guards)
 
-# The built engine contains Emscripten's virtual "/home/web_user" directory,
-# which is not a machine path, so the path guard skips it.
+# The built engine names Emscripten's virtual home directory (web_user's),
+# which is not a machine path, so the path guard skips built engines.
 _tracked_text_files = guards.tracked_text_files
 guards.tracked_text_files = lambda repo: (
     (name, path) for name, path in _tracked_text_files(repo) if "-engine." not in os.path.basename(name))
