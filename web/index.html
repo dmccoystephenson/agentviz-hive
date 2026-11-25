@@ -4,316 +4,71 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Agent Hive</title>
+<link rel="stylesheet" href="agentviz-hud.css">
 <style>
-  :root { color-scheme: dark; --bg: #1d1408; --fg: #fbeed2; --muted: #d8c39a; --panel: rgba(36, 24, 10, 0.9);
-    --edge: rgba(255, 200, 90, 0.35); --honey: #ffb21c; --alarm: #ff7a1a; }
-  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--fg);
-    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  /* The hive's honey theme for the kit's HUD (agentviz-hud.css), and its own labels and legend. */
+  :root { color-scheme: dark; --bg: #1d1408;
+    --av-fg: #fbeed2; --av-muted: #d8c39a; --av-panel: rgba(36, 24, 10, 0.9); --av-line: rgba(255, 200, 90, 0.35);
+    --av-wait: #ff7a1a; --av-wait-fg: #1d0c00; --av-note: #ffd28a; --av-busy: #ffb21c; --av-idle: #a08250;
+    --av-off: #6a6a6a; --av-stall: #e02010; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--av-fg); font: var(--av-font); }
   #view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
   #labels { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
-  .label { position: absolute; transform: translate(-50%, -100%); white-space: nowrap; font-size: 12px;
-    padding: 2px 8px; border-radius: 999px; background: var(--panel); border: 1px solid var(--edge);
-    display: flex; align-items: center; gap: 4px; transition: opacity .2s; }
-  .label .dot { width: 8px; height: 8px; border-radius: 50%; }
-  .label.place { background: none; border: none; font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
-    color: var(--muted); text-shadow: 0 1px 2px #000, 0 0 6px #000; }
-  .label.waiting { background: var(--alarm); color: #1d0c00; font-weight: 700; animation: pulse 0.9s infinite alternate; }
-  .label.offline { opacity: .55; }
-  .label.sel { outline: 2px solid #fff; }
-  @keyframes pulse { from { transform: translate(-50%, -100%) scale(1); } to { transform: translate(-50%, -100%) scale(1.12); } }
+  .av-label.lead::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--band); flex: none; }
+  .av-label.place { background: none; border: none; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--av-muted); text-shadow: 0 1px 2px #000, 0 0 6px #000; }
+  .av-label.waiting { background: var(--av-wait); color: var(--av-wait-fg); border-color: var(--av-note); font-weight: 700;
+    animation: av-throb 1.1s ease-in-out infinite; }
+  .av-label.offline { opacity: 0.55; }
+  .av-label.sel { outline: 2px solid #fff; }
   .sk-label-off { opacity: 0 !important; }
-
-  #top { position: fixed; top: max(10px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
-    display: flex; gap: 8px; align-items: center; pointer-events: none; }
-  .chip { pointer-events: auto; display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px;
-    background: var(--panel); border: 1px solid var(--edge); font-weight: 600; cursor: pointer; color: var(--fg);
-    font: inherit; }
-  #needs { background: var(--alarm); color: #1d0c00; border-color: #ffd28a; animation: glow 0.8s infinite alternate; }
-  @keyframes glow { from { box-shadow: 0 0 4px 1px var(--alarm); } to { box-shadow: 0 0 22px 8px var(--alarm); } }
-  #counts { cursor: default; font-weight: 500; }
-  #counts span { display: inline-flex; align-items: center; gap: 3px; }
-  #fixtureTag { position: fixed; right: 10px; bottom: max(10px, env(safe-area-inset-bottom)); font-size: 11px;
-    color: var(--muted); background: var(--panel); padding: 2px 8px; border-radius: 999px; }
-  #helpBtn { position: fixed; left: max(10px, env(safe-area-inset-left)); bottom: max(10px, env(safe-area-inset-bottom));
-    width: 36px; height: 36px; justify-content: center; padding: 0; }
-
-  #sheet { position: fixed; right: 12px; top: 60px; width: 320px; max-height: calc(100% - 80px); overflow: auto;
-    background: var(--panel); border: 1px solid var(--edge); border-radius: 14px; padding: 12px 14px;
-    box-shadow: 0 10px 30px rgba(0,0,0,.5); }
-  #sheet[hidden], #legend[hidden] { display: none; }
-  #sheet h2 { margin: 0; font-size: 18px; display: flex; align-items: center; gap: 8px; }
-  #sheet .close { position: absolute; right: 8px; top: 8px; background: none; border: 0; color: var(--fg);
-    font-size: 20px; cursor: pointer; width: 32px; height: 32px; }
-  .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
-  .pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px;
-    background: rgba(255,255,255,.08); font-size: 13px; }
-  .pill.waiting { background: var(--alarm); color: #1d0c00; font-weight: 700; }
-  .pill.busy { background: rgba(255,178,28,.25); }
-  .pill.offline { opacity: .6; }
-  .pill.stalled { background: #c21d12; }
-  .muted { color: var(--muted); font-size: 12px; }
-  .lbl { margin-top: 8px; font-size: 14px; word-break: break-word; }
-  ul.followers { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 4px; }
-  ul.followers li { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 8px;
-    background: rgba(255,255,255,.05); cursor: pointer; }
-  ul.followers li.resting { opacity: .55; }
-  svg.ic { width: 18px; height: 18px; flex: none; }
-  #legend { position: fixed; left: 12px; bottom: 56px; width: 300px; max-height: 70%; overflow: auto;
-    background: var(--panel); border: 1px solid var(--edge); border-radius: 14px; padding: 10px 12px; }
-  #legend div { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 13px; }
-
-  @media (max-width: 640px) {
-    #sheet { left: 0; right: 0; top: auto; bottom: 0; width: auto; max-height: 55%; border-radius: 16px 16px 0 0;
-      padding-bottom: max(14px, env(safe-area-inset-bottom)); }
-    #sheet::before { content: ""; display: block; width: 40px; height: 4px; border-radius: 2px; margin: -4px auto 8px;
-      background: var(--muted); opacity: .6; }
-    #legend { left: 0; right: 0; bottom: 0; width: auto; border-radius: 16px 16px 0 0; }
-    #counts { display: none; }
-  }
+  .av-legend h3 { margin: 10px 0 6px; font-size: 12px; color: var(--av-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .av-legend h3:first-child { margin-top: 0; }
+  .av-legend ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
+  .av-legend li { display: flex; gap: 8px; align-items: center; }
+  .sw { width: 22px; height: 14px; border-radius: 3px; flex: none; border: 1px solid var(--av-line); }
 </style>
 </head>
 <body>
 <canvas id="view" tabindex="0" role="img" aria-label="Claude Code sessions as bees on a honeycomb"></canvas>
 <div id="labels" aria-hidden="true"></div>
-<div id="top">
-  <button id="needs" class="chip" hidden aria-live="assertive"></button>
-  <div id="counts" class="chip" aria-live="polite"></div>
-</div>
-<button id="helpBtn" class="chip" aria-label="What the hive shows">?</button>
-<div id="legend" hidden></div>
-<div id="fixtureTag" hidden>demo feed</div>
-<section id="sheet" hidden aria-live="polite"></section>
-
+<aside id="legend" hidden aria-label="What the hive shows">
+  <h3>Bees</h3>
+  <ul>
+    <li><span class="sw" style="background:#ffc21c"></span>Big crowned bee in the middle of a patch: a session (lead)</li>
+    <li><span class="sw" style="background:#c99a40"></span>Small bee wearing the lead's colour, bridged to its cell: a subagent</li>
+    <li><span class="sw" style="background:#7a6640"></span>Dim worker sitting still, faint bridge: a resting subagent</li>
+    <li><span class="sw" style="background:#ffe9a0"></span>A puff of pollen and a spreading ring: a new tool call</li>
+  </ul>
+  <h3>What it is doing</h3>
+  <ul>
+    <li><span class="sw" style="background:#f5e1a8;border-color:var(--av-a-edit)"></span>edit: wax rising in the cell, walking the rim</li>
+    <li><span class="sw" style="background:#ffe14d;border-color:var(--av-a-run)"></span>run: wing blur and sparks</li>
+    <li><span class="sw" style="background:#9fe3ff;border-color:var(--av-a-read)"></span>read: antennae probing the cells</li>
+    <li><span class="sw" style="background:#ff7fb3;border-color:var(--av-a-web)"></span>web: flying to the flower field</li>
+    <li><span class="sw" style="background:#ffb21c;border-color:var(--av-a-delegate)"></span>delegate: the waggle dance</li>
+    <li><span class="sw" style="background:#d8d8ff;border-color:var(--av-a-think)"></span>think: still, three dots</li>
+    <li><span class="sw" style="background:#e8c07a;border-color:var(--av-a-other)"></span>other: a lazy hover</li>
+  </ul>
+  <h3>Cells</h3>
+  <ul>
+    <li><span class="sw" style="background:#ffa01c"></span>Honey in the cell: busy; deeper honey, more tool calls</li>
+    <li><span class="sw" style="background:var(--av-wait)"></span>Glowing cell, beacon, alarm dance: NEEDS YOU; a "?" for a question, a padlock for a permission prompt</li>
+    <li><span class="sw" style="background:#8a6a2a"></span>Capped, dim cell: idle</li>
+    <li><span class="sw" style="background:#6a6a6a"></span>Empty grey cap: offline</li>
+    <li><span class="sw" style="background:#e02010"></span>Cell flashing red: stalled (a lead busy but silent 5 min, or a subagent quiet that long)</li>
+    <li><span class="sw" style="background:#d86bff"></span>Purple scent trail: two live sessions in one repo</li>
+    <li><span class="sw" style="background:#7a9a50"></span>Tinted patch of cells: one per session, coloured by its repo</li>
+  </ul>
+</aside>
 <script src="strata-loader.js"></script>
 <script src="strata-kit.js"></script>
-<script src="hive.js"></script>
-<script>
-"use strict";
-const ICONS = {
-  edit: '<path d="M4 20l4-1 10-10-3-3L5 16z" fill="#ffd36a"/><path d="M14 6l3 3" stroke="#3a2205" stroke-width="1.5"/>',
-  run: '<path d="M13 2L5 14h6l-2 8 8-12h-6z" fill="#ffe14d"/>',
-  read: '<circle cx="10" cy="10" r="6" fill="none" stroke="#9fe3ff" stroke-width="2.5"/><path d="M14.5 14.5L21 21" stroke="#9fe3ff" stroke-width="3"/>',
-  web: '<circle cx="12" cy="12" r="3" fill="#ffcf2e"/><g fill="#ff7fb3"><circle cx="12" cy="5" r="3.2"/><circle cx="19" cy="12" r="3.2"/><circle cx="12" cy="19" r="3.2"/><circle cx="5" cy="12" r="3.2"/></g><circle cx="12" cy="12" r="3" fill="#ffcf2e"/>',
-  delegate: '<path d="M7 12c0-4 4-4 5 0s5 4 5 0-4-4-5 0-5 4-5 0z" fill="none" stroke="#ffb21c" stroke-width="2.5"/>',
-  think: '<g fill="#d8d8ff"><circle cx="6" cy="14" r="2"/><circle cx="12" cy="11" r="2.4"/><circle cx="18" cy="8" r="2.8"/></g>',
-  other: '<path d="M12 3l9 5v8l-9 5-9-5V8z" fill="none" stroke="#e8c07a" stroke-width="2"/>',
-  none: '<path d="M12 3l9 5v8l-9 5-9-5V8z" fill="#6b5634"/>',
-  waiting: '<path d="M12 2l10 18H2z" fill="#ff7a1a"/><path d="M12 9v5M12 16.5v1.5" stroke="#1d0c00" stroke-width="2.4"/>',
-  idle: '<path d="M12 3l9 5v8l-9 5-9-5V8z" fill="#8a6a2a"/><path d="M5 9h14" stroke="#c99a40" stroke-width="2"/>',
-  offline: '<path d="M12 3l9 5v8l-9 5-9-5V8z" fill="#6a6a6a"/>',
-  busy: '<path d="M12 3l9 5v8l-9 5-9-5V8z" fill="#ffb21c"/>',
-  stalled: '<path d="M12 3l9 5v8l-9 5-9-5V8z" fill="#e02010"/><path d="M12 7v6M12 15.5v1.5" stroke="#fff" stroke-width="2.4"/>',
-  bee: '<ellipse cx="12" cy="14" rx="6" ry="5" fill="#ffc21c"/><path d="M9 10v8M12 9v10M15 10v8" stroke="#1a1208" stroke-width="1.6"/><ellipse cx="8" cy="7" rx="4" ry="2.5" fill="#dfefff"/><ellipse cx="16" cy="7" rx="4" ry="2.5" fill="#dfefff"/>',
-  scent: '<path d="M3 17c4-10 14-10 18 0" fill="none" stroke="#d86bff" stroke-width="3" stroke-dasharray="2 3"/>',
-  dim: '<path d="M12 3l9 5v8l-9 5-9-5V8z" fill="#5a4a2a"/>',
-  active: '<path d="M12 3l9 5v8l-9 5-9-5V8z" fill="#ffb21c"/>',
-  resting: '<path d="M12 3l9 5v8l-9 5-9-5V8z" fill="#7a6640"/>',
-};
-const icon = (k) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICONS[k] || ICONS.other}</svg>`;
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
-const ACTION_WORD = {edit: "building wax (edit)", run: "buzzing (run)", read: "probing cells (read)",
-  web: "foraging flowers (web)", delegate: "waggle dance (delegate)", think: "still (think)",
-  other: "hovering (other)", none: "resting"};
-
-const params = new URLSearchParams(location.search);
-const FIXTURE = params.get("fixture") === "1";
-const feedUrl = "/api/agents" + (FIXTURE ? "?fixture=1" : "");
-let kit = null, hive = null, mod = null;
-const labelEls = new Map();
-const labelsBox = document.getElementById("labels");
-
-function labelFor(key, cls) {
-  let el = labelEls.get(key);
-  if (!el) {
-    el = document.createElement("div");
-    labelsBox.appendChild(el);
-    labelEls.set(key, el);
-  }
-  el.className = "label " + cls;
-  return el;
-}
-
-function legend() {
-  const rows = [
-    ["bee", "Big crowned bee = a session (lead)"], ["bee", "Small bee, same back colour = its subagent"],
-    ["edit", "Wax rising in the cell = edit"], ["run", "Wing blur + sparks = run"],
-    ["read", "Antennae probing cells = read"], ["web", "Flying to the flower field = web"],
-    ["delegate", "Waggle dance = delegate"], ["think", "Still, three dots = think"],
-    ["other", "Lazy hover = other"], ["waiting", "Glowing cell, alarm dance, beacon = NEEDS YOU"],
-    ["idle", "Capped dim cell = idle"], ["offline", "Empty grey cap = offline"],
-    ["stalled", "Cell flashing red = stalled (busy, silent 5 min)"],
-    ["scent", "Purple scent trail = two sessions in one repo"],
-  ];
-  document.getElementById("legend").innerHTML = rows.map(([k, t]) => `<div>${icon(k)}<span>${esc(t)}</span></div>`).join("");
-}
-
-function showSheet() {
-  const sheet = document.getElementById("sheet");
-  const key = hive && hive.selectedKey;
-  if (!key) { sheet.hidden = true; return; }
-  const s = hive.sessions.get(key);
-  const f = !s && hive.followers.get(key);
-  if (!s && !f) { sheet.hidden = true; return; }
-  let html = `<button class="close" aria-label="Close">&times;</button>`;
-  if (s) {
-    const d = s.data;
-    const band = HiveColors.cssColor(HiveColors.hsl(d.seed || 0, 0.75, 0.55));
-    const stateKey = d.stalled ? "stalled" : d.state;
-    html += `<h2>${icon("bee")}<span>${esc(d.name || d.id)}</span><span class="dot" style="width:12px;height:12px;border-radius:50%;background:${band}"></span></h2>
-      <div class="row"><span class="pill ${esc(stateKey)}">${icon(stateKey)}${esc(stateKey === "waiting" ? "waiting: needs you" : stateKey)}</span>
-      ${(d.state === "busy" || d.state === "waiting") && d.action !== "none" ? `<span class="pill">${icon(d.action)}${esc(ACTION_WORD[d.action] || d.action)}</span>` : ""}</div>
-      ${d.activity && d.activity.label ? `<div class="lbl">${icon(d.activity.action)} ${esc(d.activity.label)} <span class="muted">${esc(d.activity.tool || "")}</span></div>` : ""}
-      <div class="row muted"><span>repo <b>${esc(d.placeLabel || d.place)}</b></span>${d.branch ? `<span>branch <b>${esc(d.branch)}</b></span>` : ""}${hive.sharedPlaces && hive.sharedPlaces.includes(d.place) ? `<span>${icon("scent")} shares this repo</span>` : ""}</div>`;
-    const fl = d.followers || [];
-    html += `<div class="row muted">${fl.length} subagent${fl.length === 1 ? "" : "s"}</div>`;
-    if (fl.length) {
-      html += `<ul class="followers">` + fl.map((x) => `<li data-key="${esc(d.id + "/" + x.id)}" class="${esc(x.state)}">${icon(x.state === "active" ? x.action : "resting")}<span>${esc(x.label || x.id)}</span><span class="muted">${esc(x.state)}</span></li>`).join("") + `</ul>`;
-    }
-  } else {
-    const d = f.data, lead = hive.sessions.get(f.lead);
-    html += `<h2>${icon("bee")}<span>${esc(d.label || d.id)}</span></h2>
-      <div class="row"><span class="pill ${d.state === "active" ? "busy" : ""}">${icon(d.state === "active" ? "active" : "resting")}${esc(d.state)}</span>
-      ${d.state === "active" ? `<span class="pill">${icon(d.action)}${esc(ACTION_WORD[d.action] || d.action)}</span>` : ""}</div>
-      ${d.toolLabel ? `<div class="lbl">${esc(d.toolLabel)} <span class="muted">${esc(d.tool || "")}</span></div>` : (d.tool ? `<div class="lbl muted">last tool ${esc(d.tool)}</div>` : "")}
-      <div class="row muted"><span>subagent of <b data-key="${esc(f.lead)}" style="cursor:pointer;text-decoration:underline">${esc(lead ? lead.data.name : f.lead)}</b></span>
-      ${lead && lead.data.branch ? `<span>branch <b>${esc(lead.data.branch)}</b></span>` : ""}<span>${esc(d.toolCount ?? 0)} tool calls</span></div>`;
-  }
-  sheet.innerHTML = html;
-  sheet.hidden = false;
-}
-
-function select(key) {
-  hive.selectedKey = key;
-  if (kit) kit.selected = key;
-  showSheet();
-}
-
-document.getElementById("sheet").addEventListener("click", (e) => {
-  if (e.target.closest(".close")) return select(null);
-  const k = e.target.closest("[data-key]");
-  if (k) select(k.dataset.key);
-});
-document.getElementById("helpBtn").addEventListener("click", () => {
-  const l = document.getElementById("legend");
-  l.hidden = !l.hidden;
-});
-document.getElementById("needs").addEventListener("click", () => {
-  const w = [...hive.sessions.values()].find((o) => o.data.state === "waiting");
-  if (!w) return;
-  select(w.id);
-  kit.cam.tx = w.tx; kit.cam.tz = w.tz; kit.cam.dist = Math.min(kit.cam.dist, 22);
-});
-
-function hud() {
-  const d = hive.doc;
-  if (!d) return;
-  const waiting = d.sessions.filter((s) => s.state === "waiting");
-  const needs = document.getElementById("needs");
-  needs.hidden = !waiting.length;
-  if (waiting.length) needs.innerHTML = `${icon("waiting")}${waiting.length} need${waiting.length === 1 ? "s" : ""} you: ${waiting.map((s) => esc(s.name)).join(", ")}`;
-  const c = d.counts || {};
-  document.getElementById("counts").innerHTML =
-    `<span>${icon("busy")}${c.busy || 0}</span><span>${icon("idle")}${c.idle || 0}</span><span>${icon("offline")}${c.offline || 0}</span><span>${icon("bee")}${c.activeFollowers || 0}/${c.followers || 0}</span>`;
-  document.getElementById("fixtureTag").hidden = !d.fixture;
-}
-
-let firstDoc = true;
-async function poll() {
-  try {
-    const r = await fetch(feedUrl, {cache: "no-store"});
-    if (r.ok) {
-      const doc = await r.json();
-      hive.setDoc(doc);
-      if (firstDoc && kit) {
-        const [cx, cz] = hive.centre();
-        kit.cam.tx = cx; kit.cam.tz = cz;
-        kit.cam.dist = Math.max(20, hive.combRadius * 2.6);
-        firstDoc = false;
-        window.__hiveReady = true;
-      }
-      hud();
-      showSheet();
-    }
-  } catch (e) { /* the server may be restarting; try again next tick */ }
-}
-
-function placeAllLabels() {
-  const items = [];
-  const seenKeys = new Set();
-  const placeDone = new Set();
-  for (const o of hive.sessions.values()) {
-    const d = o.data;
-    const cls = d.state === "waiting" ? "waiting" : (d.state === "offline" ? "offline" : "");
-    const el = labelFor(o.id, cls + (hive.selectedKey === o.id ? " sel" : ""));
-    const band = HiveColors.cssColor(HiveColors.hsl(d.seed || 0, 0.75, 0.55));
-    const text = (d.state === "waiting" ? "! " : "") + (d.name || d.id);
-    if (el._t !== text + band) { el.innerHTML = `<span class="dot" style="background:${band}"></span>${esc(text)}`; el._t = text + band; }
-    el.style.opacity = o.alpha;
-    seenKeys.add(o.id);
-    items.push({el, q: kit.project(o.x, 2.0, o.z), rank: d.state === "waiting" || hive.selectedKey === o.id ? 0 : (d.state === "offline" ? 3 : 1)});
-    if (!placeDone.has(d.place)) {
-      placeDone.add(d.place);
-      const pk = "place:" + d.place;
-      const pel = labelFor(pk, "place");
-      if (pel.textContent !== (d.placeLabel || d.place)) pel.textContent = d.placeLabel || d.place;
-      seenKeys.add(pk);
-      items.push({el: pel, q: kit.project(o.x, 0.5, o.z + 3.4), rank: 2});
-    }
-  }
-  if (hive.selectedKey && hive.followers.has(hive.selectedKey)) {
-    const f = hive.followers.get(hive.selectedKey);
-    const el = labelFor("sel-follower", "sel");
-    if (el.textContent !== (f.data.label || f.data.id)) el.textContent = f.data.label || f.data.id;
-    seenKeys.add("sel-follower");
-    items.push({el, q: kit.project(f.x, 1.5, f.z), rank: 0});
-  }
-  for (const [k, el] of labelEls) if (!seenKeys.has(k)) { el.remove(); labelEls.delete(k); }
-  StrataKit.placeLabels(items);
-}
-
-(async () => {
-  legend();
-  try {
-    mod = await StrataLoader.load({script: "hive-engine.js", factory: "createHive", wasm: "hive-engine.wasm",
-      title: "the agent hive"});
-  } catch (e) { return; }
-  hive = new Hive(mod);
-  window.__hive = hive;
-  const canvas = document.getElementById("view");
-  try {
-    kit = StrataKit.create({
-      module: mod, canvas,
-      camera: {yaw: -1.35, pitch: 0.95, dist: 30, tx: 0, ty: 0, tz: 0},
-      limits: {maxDist: 90, minDist: 5, maxPitch: 1.45},
-      frame(t, now, dt) { hive.frame(dt); },
-      after() { placeAllLabels(); },
-      pick: (x, y, radius) => hive.pick(x, y, radius, kit.project),
-      idOf: (t) => t.key,
-      onTap(t) { select(t ? t.key : null); },
-      targets: () => {
-        const r = canvas.getBoundingClientRect();
-        return hive.things().map((t) => {
-          const s = kit.project(t.x, t.kind === "session" ? 0.9 : 0.7, t.z);
-          return s && {id: t.key, x: s.x + r.left, y: s.y + r.top};
-        }).filter(Boolean);
-      },
-      onSlow: () => StrataLoader.slow(),
-      onFatal: (code, msg) => StrataLoader.fallback(code, msg),
-    });
-  } catch (e) {
-    return StrataLoader.fallback(e.code === "no-webgl2" ? "no-webgl2" : "engine");
-  }
-  window.__hiveKit = kit;
-  window.__hiveSelect = select;
-  // A fixed late-afternoon sun, so captures repeat.
-  kit.setSun(Date.UTC(2026, 5, 21, 23, 0, 0) / 1000, 40, -105);
-  await poll();
-  setInterval(poll, 2000);
-  kit.start();
-  if (kit.driven) kit.drive(0);
-  StrataLoader.done();
-  canvas.focus({preventScroll: true});
-})();
-</script>
+<script src="agentviz-feed.js"></script>
+<script src="agentviz-screen.js"></script>
+<script src="agentviz-hud.js"></script>
+<script src="agentviz-wire.js"></script>
+<script src="hive-model.js"></script>
+<script src="hive-frame.js"></script>
+<script src="page.js"></script>
 </body>
 </html>
