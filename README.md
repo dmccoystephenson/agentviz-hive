@@ -13,7 +13,8 @@ several views of the same feed.
 ![The whole comb from the demo feed](docs/media/hero.png)
 *The whole comb from the demo feed: fifteen sessions in seven repos, each repo
 a colour. Thistle (needs permission) and Juniper (has a question) glow with
-beacons; Patch's cell flashes red (stalled); purple scent trails join live
+beacons; Patch's cell flashes red and its label says stalled; idle labels
+are muted so the busy ones read first; purple scent trails join live
 sessions that share a repo.*
 
 ![Worker bees at work](docs/media/hive.gif)
@@ -42,12 +43,16 @@ Query options: `?fixture=1` (demo feed), `?fps=1` (frame stats),
 `?quality=0|1|2`.
 
 Drag to orbit, right-drag or two fingers to pan, wheel or pinch to zoom. Tap a
-bee for its card (a bottom sheet on a phone; swipe it down or tap the cross to
+bee for its card (a bottom sheet on a phone, and the view slides up so the
+bee you tapped stays in sight above it; swipe it down or tap the cross to
 close); tap a subagent in the card to jump to it. The orange **need you** chip
 names who is waiting and why (a question, or a permission prompt), flies the
 camera to it and cycles through them; the house button recentres; **?** opens
 the legend. If the feed stops answering, a banner says so and the last
-snapshot stays; with no sessions at all, a hint says how to start.
+snapshot stays; with no sessions at all, a hint says how to start. World
+labels never sit under the top bar, the card or the legend; on a phone the
+top bar keeps to one line (the busy and subagent counts, the chip and the
+buttons).
 
 ## The metaphor
 
@@ -79,9 +84,9 @@ The comb is a hex grid of wax cells, seen from above at an angle.
 | Lazy hover | `other` | |
 | Cell glowing orange-white, ripples, a beacon of light, bee in a fast alarm dance, label and chip say why | `waiting`: the session needs you | [waiting](docs/media/waiting.png) |
 | A padlock / a "?" floating in the beacon | waiting on a permission prompt / on a question | [waiting](docs/media/waiting.png), [question](docs/media/question.png) |
-| Capped, dim cell, bee resting on the cap | `idle` (`dim` is darker) | [idle + offline](docs/media/idle-offline.png) |
+| Capped, dim cell, bee resting on the cap, a muted label | `idle` (`dim` is darker) | [idle + offline](docs/media/idle-offline.png) |
 | Empty grey cap, no bee | `offline` | [idle + offline](docs/media/idle-offline.png) |
-| Cell flashing red with a red ring | `stalled`: a session busy but silent for 5 min, or a subagent quiet that long without finishing | [stalled](docs/media/stalled.png), [lead + subagents](docs/media/lead-subagents.png) |
+| Cell flashing red with a red ring; a lead's label is ringed red and ends in "stalled" | `stalled`: a session busy but silent for 5 min, or a subagent quiet that long without finishing | [stalled](docs/media/stalled.png), [lead + subagents](docs/media/lead-subagents.png) |
 | Dim worker sitting still on its cell, faint bridge | a resting subagent | [resting](docs/media/resting-subagent.png) |
 | Glowing purple arc with drifting motes between two leads | two live sessions in the same repo (possible conflict) | [shared repo](docs/media/shared-repo.png) |
 
@@ -116,7 +121,7 @@ cap.*
 
 ![Stalled](docs/media/stalled.png)
 *Patch has been busy with nothing written for over five minutes: its cell
-flashes red.*
+flashes red, and its label is ringed red and says "stalled".*
 
 ![Resting subagent](docs/media/resting-subagent.png)
 *Wren's `tests + docs` worker is resting: dim, wings folded, a faint bridge.
@@ -132,7 +137,7 @@ subagents as chips you can tap to jump to one.*
 | Phone, bottom sheet | Phone, needs-you |
 |---|---|
 | ![Phone with bottom sheet](docs/media/phone-sheet.png) | ![Phone waiting](docs/media/phone-waiting.png) |
-| *390 x 844 at DPR 3: Wren selected, the card as a bottom sheet.* | *The whole comb on a phone, with the needs-you chip.* |
+| *390 x 844 at DPR 3: Wren selected, the card as a bottom sheet.* | *The whole comb on a phone: a steeper view fills the height, and the top bar stays one line.* |
 
 | Low angle | Top down |
 |---|---|
