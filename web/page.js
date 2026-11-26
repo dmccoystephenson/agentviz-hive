@@ -48,18 +48,11 @@
   }
   // On a phone the card is a bottom sheet over the lower half: if it would
   // cover the bee just tapped, slide the view (no zoom, no turn) so the bee
-  // sits in the clear upper part of the screen.
+  // sits in the clear part of the screen above it.
   function keepClearOfSheet(bee) {
     if (!kit || canvas.clientWidth > PHONE_WIDTH) return;
-    const h = canvas.clientHeight, y = bee.lead ? 0.9 : 0.7;
-    const at = (dx, dz) => kit.project(bee.o.tx + dx, y, bee.o.tz + dz);
-    const q = at(0, 0);
-    if (!q || q.y < h * 0.4) return;
-    const fx = -Math.cos(kit.cam.yaw), fz = -Math.sin(kit.cam.yaw);  // screen-up on the ground (strata-kit.js)
-    const ahead = at(fx, fz), perUnit = ahead ? q.y - ahead.y : 0;
-    if (perUnit <= 0.5) return;
-    const u = (q.y - h * 0.3) / perUnit;
-    flyTo({tx: kit.cam.tx - fx * u, tz: kit.cam.tz - fz * u});
+    const to = AgentvizScreen.reveal(kit.cam, [bee.o.tx, bee.lead ? 0.9 : 0.7, bee.o.tz], hud.freeRect(canvas));
+    if (to) flyTo(to);
   }
 
   /* ------------------------------------------------------------ labels */
@@ -101,57 +94,30 @@
     placeClear(items);
   }
 
-  // Keep world labels out from under the HUD: the top bar's chips, the open
-  // card or sheet, the legend. Strata kit 1.4 takes these as placeLabels'
-  // topInset / avoid; until the vendored kit is 1.4 the same rectangles go
-  // in as placed-first stand-in labels (rank -1, sizes preset so nothing is
-  // measured), and a never-hidden label that still reaches into the top band
-  // is moved down to just under it, as 1.4 does.
+  // Keep world labels out from under the HUD (agentviz-hud.js placeLabels):
+  // the open card or sheet, the legend and, on a phone, the whole top band.
+  // On a desktop the bar's empty middle stays usable: only its chips are
+  // kept clear. Strata kit 1.4 takes the area as placeLabels' topInset /
+  // avoid; until the vendored kit is 1.4 AgentvizScreen.keepClear does it.
   const KIT_AVOIDS = (() => {
     const [major, minor] = String(StrataKit.version).split(".").map(Number);
     return major > 1 || (major === 1 && minor >= 4);
   })();
-  const HUD_PARTS = ".av-bar > :not([hidden]):not(.av-spacer), .av-panel:not([hidden]), .av-legend:not([hidden])";
-  let hudRects = [], topInset = 0, hudReadAt = -1e9;
-  function readHud() {
-    const now = performance.now();
-    if (now - hudReadAt < 250) return;
-    hudReadAt = now;
-    const pad = 4, c = canvas.getBoundingClientRect();
-    hudRects = [...document.querySelectorAll(HUD_PARTS)].map((node) => node.getBoundingClientRect())
-      .filter((r) => r.width > 0 && r.height > 0)
-      .map((r) => ({left: r.left - c.left - pad, top: r.top - c.top - pad, right: r.right - c.left + pad,
-        bottom: r.bottom - c.top + pad}));
-    const bar = document.querySelector(".av-bar");
-    // On a phone the bar spans the width: keep the whole band clear.
-    topInset = bar && canvas.clientWidth <= PHONE_WIDTH ? bar.getBoundingClientRect().bottom - c.top + pad : 0;
-  }
-  const standIns = [];
-  function standIn(i, r) {
-    if (!standIns[i]) { standIns[i] = document.createElement("span"); standIns[i]._skText = ""; }
-    const el = standIns[i];
-    el._skW = r.right - r.left; el._skH = r.bottom - r.top;
-    return {el, q: {x: (r.left + r.right) / 2, y: r.bottom, w: 0}, rank: -1, tries: 1};
-  }
   function placeClear(items) {
-    readHud();
-    if (KIT_AVOIDS) { StrataKit.placeLabels(items, {topInset, avoid: hudRects}); keepOnScreen(items); return; }
-    const rects = topInset > 0 ? [{left: -1e5, top: -1e5, right: 1e5, bottom: topInset}].concat(hudRects) : hudRects;
-    StrataKit.placeLabels(rects.map((r, i) => standIn(i, r)).concat(items));
-    keepOnScreen(items);
-  }
-  // A never-hidden label (a waiting session's, the selected one's) is pulled
-  // back inside the screen's sides and below the top band, so "needs you" is
-  // never cut off or covered.
-  function keepOnScreen(items) {
-    const w = canvas.clientWidth, margin = 4;
-    for (const it of items) {
-      const el = it.el;
-      if (it.rank > 0 || !el._skShown || !it.q) continue;
-      const bottom = parseFloat(el.style.top);
-      if (!KIT_AVOIDS && bottom - el._skH < topInset) el.style.top = (topInset + el._skH) + "px";
-      const half = el._skW / 2, x = Math.min(Math.max(it.q.x, half + margin), w - half - margin);
-      if (x !== it.q.x) el.style.left = x + "px";
+    if (canvas.clientWidth <= PHONE_WIDTH) { hud.placeLabels(items, {canvas, strataAvoid: KIT_AVOIDS}); return; }
+    const area = hud.clearArea(canvas), pad = 4, c = canvas.getBoundingClientRect();
+    for (const chip of hud.bar.querySelectorAll(".av-chip:not([hidden])")) {
+      const r = chip.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) area.avoid.push({x0: r.left - c.left - pad, y0: r.top - c.top - pad,
+        x1: r.right - c.left + pad, y1: r.bottom - c.top + pad});
+    }
+    area.top = -Infinity;
+    if (KIT_AVOIDS) {
+      AgentvizScreen.keepClear(items, {W: area.W, H: area.H});
+      StrataKit.placeLabels(items, AgentvizScreen.strataAvoid(area));
+    } else {
+      AgentvizScreen.keepClear(items, area);
+      StrataKit.placeLabels(items);
     }
   }
 
@@ -179,6 +145,7 @@
     legend: document.getElementById("legend"),
     buttons: [{icon: "home", label: "Recentre the view", onClick: () => fit(false)}],
     onSelect,
+    oneRow: true,
     rows: ({session, follower}) => (!follower && model.sharedPlaces.includes(session.place)
       ? [["scent", "shares this repo with another live session"]] : []),
   });
